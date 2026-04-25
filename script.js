@@ -19,7 +19,21 @@ const SUPABASE_ANON_KEY = (window.SUPABASE_ANON_KEY || "").trim();
 function getSupabase() {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
   if (!window.supabase || !window.supabase.createClient) return null;
-  if (!window.__sb) window.__sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  if (!window.__sb) {
+    window.__sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+        detectSessionInUrl: false,
+      },
+      global: {
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: "Bearer " + SUPABASE_ANON_KEY,
+        },
+      },
+    });
+  }
   return window.__sb;
 }
 
@@ -1010,18 +1024,19 @@ async function submitForm() {
     const totW  = document.getElementById("total-amount-wrap"); if (totW) totW.style.display = "none";
     if (document.getElementById("f-cat-mic"))  document.getElementById("f-cat-mic").value  = "";
   } catch (err) {
-    console.error("Supabase insert error:", err, { dbPayload });
-    const errMsg = err?.message || err?.details || err?.hint || JSON.stringify(err) || "unknown";
-    const errCode = err?.code || err?.status || "";
+    const errCode    = err?.code    || err?.status || "";
+    const errMsg     = err?.message || err?.details || err?.hint || "";
+    const errFull    = JSON.stringify(err, Object.getOwnPropertyNames(err)) || "unknown";
+    console.error("Supabase insert error:", errFull, "\nPayload:", JSON.stringify(dbPayload, null, 2));
 
     if (errCode === "42501" || err?.status === 403) {
       showToast("❌ RLS blocked. Code: " + errCode + " — " + errMsg, "error");
     } else if (errCode === "23502") {
       showToast("❌ Missing required field: " + errMsg, "error");
     } else if (errCode === "42703") {
-      showToast("❌ Unknown column in payload: " + errMsg, "error");
+      showToast("❌ Unknown column: " + errMsg, "error");
     } else {
-      showToast("❌ Insert failed [" + errCode + "]: " + errMsg, "error");
+      showToast("❌ Insert failed [" + errCode + "]: " + (errMsg || errFull.slice(0,120)), "error");
     }
     btn.classList.remove("submitting"); btn.disabled = false;
   } finally {
