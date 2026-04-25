@@ -22,15 +22,9 @@ function getSupabase() {
   if (!window.__sb) {
     window.__sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
-        autoRefreshToken: false,
-        persistSession: false,
+        autoRefreshToken: true,
+        persistSession: true,
         detectSessionInUrl: false,
-      },
-      global: {
-        headers: {
-          apikey: SUPABASE_ANON_KEY,
-          Authorization: "Bearer " + SUPABASE_ANON_KEY,
-        },
       },
     });
   }
@@ -265,6 +259,53 @@ document.getElementById("club-logo-img").src    = IMG_GSCCC;
 document.getElementById("club-popover-logo").src = IMG_GSCCC;
 
 // ================================================================
+//  LOADING SCREEN
+// ================================================================
+(function() {
+  const ls    = document.getElementById("loading-screen");
+  const bar   = document.getElementById("ls-bar");
+  const lsRev = document.getElementById("ls-rev");
+  const ls20  = document.getElementById("ls-20");
+  if (!ls || !bar) return;
+
+  // Set logo images (IMG_REV / IMG_20 are already loaded from assets.js)
+  if (lsRev) lsRev.src = IMG_REV;
+  if (ls20)  ls20.src  = IMG_20;
+
+  // Animate progress bar: fast to 80%, then wait for window.load to finish
+  let pct = 0;
+  const tick = setInterval(() => {
+    pct = Math.min(pct + (Math.random() * 12 + 6), 80);
+    bar.style.width = pct + "%";
+    if (pct >= 80) clearInterval(tick);
+  }, 100);
+
+  const MIN_MS = 500; // minimum time loading screen stays visible (ms)
+  const startTime = Date.now();
+
+  function dismiss() {
+    clearInterval(tick);
+    bar.style.width = "100%";
+    // Wait for minimum time before fading out
+    const elapsed = Date.now() - startTime;
+    const delay = Math.max(0, MIN_MS - elapsed);
+    setTimeout(() => {
+      ls.classList.add("done");
+      setTimeout(() => ls.remove(), 450);
+    }, delay + 180);
+  }
+
+  // Dismiss on full page load (fonts, images, scripts all ready)
+  if (document.readyState === "complete") {
+    dismiss();
+  } else {
+    window.addEventListener("load", dismiss, { once: true });
+    // Safety fallback — never block the user more than 3s
+    setTimeout(dismiss, 3000);
+  }
+})();
+
+// ================================================================
 //  CLUB LOGO BUTTON — toggle about popover
 // ================================================================
 (function() {
@@ -291,40 +332,43 @@ document.getElementById("club-popover-logo").src = IMG_GSCCC;
 //  PAGE ROUTING  —  hash-based, control-panel is HIDDEN
 // ================================================================
 function showPage(name) {
+  // Lock body scroll during transition to prevent double-scrollbar glitch
+  document.body.style.overflow = "hidden";
+
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
   const target = document.getElementById("page-" + name);
-  if (!target) return;
+  if (!target) { document.body.style.overflow = ""; return; }
   target.classList.add("active");
   target.classList.remove("page-enter");
   void target.offsetWidth;
   target.classList.add("page-enter");
-  // nav link highlight (control-panel has no link, so nothing highlights)
   document.querySelectorAll(".nav-link").forEach(l => l.classList.toggle("active", l.dataset.page === name));
-  // close mobile menu
   hb.classList.remove("open"); mob.classList.remove("open");
-  // scroll to top
   window.scrollTo(0,0);
-  // push history state so browser/phone back works
   if (location.hash.replace("#","") !== name) {
     history.pushState({ page: name }, "", "#" + name);
   }
-  // page init
   if (name === "control-panel") initCP();
   if (name === "segments")      buildSegDetailGrid();
   if (name === "home")          buildHomeSegGrid();
   initReveal(); initCardReveal();
   if (window._bindCursor) window._bindCursor();
+
+  // Restore scroll after transition completes (matches pageIn animation duration 0.45s)
+  setTimeout(() => { document.body.style.overflow = ""; }, 460);
 }
 
 // Handle browser/phone back & forward buttons
 window.addEventListener("popstate", e => {
   const page = (e.state && e.state.page) || location.hash.replace("#","") || "home";
   const valid = ["home","segments","register","contact","success","control-panel","how-to-register"];
-  // Show the page without pushing another history entry
   const name = valid.includes(page) ? page : "home";
+
+  document.body.style.overflow = "hidden";
+
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
   const target = document.getElementById("page-" + name);
-  if (!target) return;
+  if (!target) { document.body.style.overflow = ""; return; }
   target.classList.add("active");
   target.classList.remove("page-enter");
   void target.offsetWidth;
@@ -337,6 +381,8 @@ window.addEventListener("popstate", e => {
   if (name === "home")          buildHomeSegGrid();
   initReveal(); initCardReveal();
   if (window._bindCursor) window._bindCursor();
+
+  setTimeout(() => { document.body.style.overflow = ""; }, 460);
 });
 
 // Hash routing on load — including the hidden control-panel route
@@ -1138,12 +1184,6 @@ async function loadRegistrations() {
 
   ind.innerHTML = '<span class="api-status local"><span class="api-status-dot"></span> Fetching…</span>';
   try {
-    // Explicitly verify session is alive before querying
-    const { data: sessionData } = await sb.auth.getSession();
-    if (!sessionData || !sessionData.session) {
-      throw new Error("No active session — please log in again.");
-    }
-
     // Auto-retry once — Supabase free tier has cold-start latency
     async function fetchRegs() {
       const fetchPromise = sb
@@ -1213,6 +1253,15 @@ function renderDist() {
   ).join("");
 }
 
+function escHtml(str) {
+  return String(str || "")
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#39;");
+}
+
 function filterTable() {
   const q   = (document.getElementById("cp-search").value||"").toLowerCase();
   const seg = document.getElementById("f-segment").value;
@@ -1220,7 +1269,7 @@ function filterTable() {
   const rows = cpRegs.filter(r =>
     (!q || r.name.toLowerCase().includes(q) || r.email.toLowerCase().includes(q) || (r.institution||"").toLowerCase().includes(q)) &&
     (!seg || (r.segment||"").split(",").map(s=>s.trim()).includes(seg)) &&
-    (!sts || r.status  === sts)
+    (!sts || r.status === sts)
   );
   const tbody = document.getElementById("cp-tbody");
   if (!rows.length) {
@@ -1228,34 +1277,39 @@ function filterTable() {
     document.getElementById("table-count").textContent = "";
     return;
   }
-  tbody.innerHTML = rows.map(r => {
-    const hasPhoto = (r.photo||"").startsWith("data:image");
-    return `
-    <tr>
-      <td style="font-family:var(--font-m);font-size:.78rem;color:var(--gold)">${r.id}</td>
-      <td style="color:var(--text);font-weight:600">
-        ${hasPhoto ? `<img src="${r.photo}" onclick="viewPhotos('${r.id}')" style="width:30px;height:30px;object-fit:cover;border-radius:4px;border:1px solid rgba(201,168,76,.4);cursor:pointer;vertical-align:middle;margin-right:6px;" title="View photos">` : ""}${r.name}
-      </td>
-      <td>${r.email}</td>
-      <td>${r.phone}</td>
-      <td>${r.institution||""}</td>
-      <td style="color:var(--accent-light)">${r.segmentname}</td>
-      <td style="font-family:var(--font-m);font-size:.78rem;color:var(--gold)">${r.category ? "Cat " + r.category : "—"}</td>
-      <td style="font-family:var(--font-m);font-size:.78rem">${r.txn}</td>
-      <td style="font-family:var(--font-m);font-size:.78rem">${r.bkash||"—"}</td>
-      <td style="font-size:.8rem">${new Date(r.timestamp).toLocaleDateString("en-BD",{day:"2-digit",month:"short",year:"2-digit"})}</td>
-      <td><span class="status-badge ${r.status}">${r.status}</span></td>
-      <td>
-        <div class="act-btns">
-          <button class="act-btn ok"  onclick="setStatus('${r.id}','approved')">✓</button>
-          <button class="act-btn no"  onclick="setStatus('${r.id}','rejected')">✕</button>
-          <button class="act-btn"     onclick="viewPhotos('${r.id}')" title="Photos">🖼</button>
-          <button class="act-btn del" onclick="delReg('${r.id}')">🗑</button>
-        </div>
-      </td>
-    </tr>`;
-  }).join("");
-  document.getElementById("table-count").textContent = `Showing ${rows.length} of ${cpRegs.length} registrations`;
+  try {
+    tbody.innerHTML = rows.map(r => {
+      const safeId = escHtml(r.id);
+      const hasScreenshot = !!(r.note && r.note.includes("Screenshot: http"));
+      return `
+      <tr>
+        <td style="font-family:var(--font-m);font-size:.78rem;color:var(--gold)">${safeId}</td>
+        <td style="color:var(--text);font-weight:600">${escHtml(r.name)}</td>
+        <td>${escHtml(r.email)}</td>
+        <td>${escHtml(r.phone)}</td>
+        <td>${escHtml(r.institution||"")}</td>
+        <td style="color:var(--accent-light)">${escHtml(r.segmentname)}</td>
+        <td style="font-family:var(--font-m);font-size:.78rem;color:var(--gold)">${r.category ? "Cat " + escHtml(r.category) : "—"}</td>
+        <td style="font-family:var(--font-m);font-size:.78rem">${escHtml(r.txn)}</td>
+        <td style="font-family:var(--font-m);font-size:.78rem">${escHtml(r.bkash||"—")}</td>
+        <td style="font-size:.8rem">${new Date(r.timestamp).toLocaleDateString("en-BD",{day:"2-digit",month:"short",year:"2-digit"})}</td>
+        <td><span class="status-badge ${r.status}">${r.status}</span></td>
+        <td>
+          <div class="act-btns">
+            <button class="act-btn ok"  onclick="setStatus('${r.id}','approved')">✓</button>
+            <button class="act-btn no"  onclick="setStatus('${r.id}','rejected')">✕</button>
+            <button class="act-btn"     onclick="viewPhotos('${r.id}')" title="${hasScreenshot ? 'View screenshot' : 'No screenshot'}">🖼</button>
+            <button class="act-btn del" onclick="delReg('${r.id}')">🗑</button>
+          </div>
+        </td>
+      </tr>`;
+    }).join("");
+    document.getElementById("table-count").textContent = `Showing ${rows.length} of ${cpRegs.length} registrations`;
+  } catch(e) {
+    console.error("filterTable render error:", e);
+    tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state"><i class="fas fa-triangle-exclamation"></i><p>Render error: ${e.message}</p></div></td></tr>`;
+  }
+  if (window._bindCursor) window._bindCursor();
 }
 
 async function setStatus(id, status) {

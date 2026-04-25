@@ -8,6 +8,52 @@
      Built for: Govt. Science College Cultural Club, Dhaka
      ============================================================ -->
 <title>Revolution 2.0 — GSCCC</title>
+<style>
+  /* ── Loading screen — critical inline CSS ── */
+  #loading-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    background: #080808;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2.5rem;
+    transition: opacity 0.4s ease, visibility 0.4s ease;
+  }
+  #loading-screen.done {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  #ls-logo-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    animation: lsPulse 1.6s ease-in-out infinite;
+  }
+  #ls-rev { height: 52px; width: auto; }
+  #ls-20  { height: 38px; width: auto; margin-top: 3px; }
+  #ls-bar-track {
+    width: min(220px, 55vw);
+    height: 2px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  #ls-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #CC1B1B, #C9A84C);
+    border-radius: 2px;
+    transition: width 0.12s ease;
+  }
+  @keyframes lsPulse {
+    0%,100% { opacity: 0.7; }
+    50%      { opacity: 1;   }
+  }
+</style>
 <link rel="stylesheet" href="styles.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Crimson+Pro:ital,wght@0,400;0,600;0,700;1,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -15,6 +61,16 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<!-- ===== LOADING SCREEN ===== -->
+<div id="loading-screen">
+  <div id="ls-logo-wrap">
+    <img id="ls-rev" alt="Revolution">
+    <img id="ls-20"  alt="2.0">
+  </div>
+  <div id="ls-bar-track">
+    <div id="ls-bar"></div>
+  </div>
+</div>
 <script src="assets/assets.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="supabase-config.js"></script>
