@@ -1514,3 +1514,38 @@ tr:last-child td{border-bottom:none}
   color: #ffb400;
 }
 .mic-cat-warn strong { color: var(--text); }
+/* ================================================================
+   SUBMISSION GROUP NOTICE — success page
+================================================================ */
+.submission-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem 1.2rem;
+  margin: 0 0 1.8rem;
+  background: rgba(24,119,242,.07);
+  border: 1px solid rgba(24,119,242,.25);
+  border-radius: 12px;
+  text-align: left;
+  animation: chipIn .3s var(--ease) both;
+}
+.submission-notice .fab {
+  font-size: 1.1rem;
+  color: #4f92ff;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.submission-notice strong {
+  display: block;
+  font-family: var(--font-h);
+  font-size: .92rem;
+  letter-spacing: .8px;
+  color: var(--text);
+  margin-bottom: .3rem;
+}
+.submission-notice p {
+  font-size: .84rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 0;
+}
