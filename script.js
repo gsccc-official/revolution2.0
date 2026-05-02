@@ -960,8 +960,12 @@ async function generateInvoice(registrationData) {
 
 async function submitForm() {
 
+  if (window._isSubmitting) return;
+  window._isSubmitting = true;
+
   const sb = getSupabase();
   if (!sb) {
+    window._isSubmitting = false;
     showToast("⚠️ Supabase is not configured. Please set SUPABASE_URL and SUPABASE_ANON_KEY.", "error");
     return;
   }
@@ -984,11 +988,19 @@ async function submitForm() {
   ok = ok && validate("f-bkash", "e-bkash", v => v.length >= 11, "Enter your bKash number (11 digits)");
   const hasMicSel  = selectedSegs.includes("mic");
   if (hasMicSel)  ok = ok && validate("f-cat-mic",  "e-cat-mic",  v => v === "A" || v === "B", "Please select a category for Singing");
-  if (!ok) return;
+  if (!ok) { window._isSubmitting = false; return; }
 
   const regId  = genRegId();
   const catMic = (document.getElementById("f-cat-mic") && document.getElementById("f-cat-mic").value) || "";
   const ssFile  = document.getElementById("f-ss").files[0];
+
+  // File size pre-check — reject before wasting upload time on slow connections
+  if (ssFile.size > 8 * 1024 * 1024) {
+    showToast("❌ Screenshot too large (max 8MB). Please crop or compress it first.", "error");
+    window._isSubmitting = false;
+    return;
+  }
+
   // IMPORTANT: Supabase/PostgREST column names must match the table schema exactly.
   const noteRaw = (document.getElementById("f-note").value.trim() || "");
 
@@ -1003,6 +1015,7 @@ async function submitForm() {
     console.error("Screenshot upload failed:", e);
     const ssErr = e?.message || e?.error_description || JSON.stringify(e) || "unknown";
     showToast("❌ Screenshot upload failed: " + ssErr, "error");
+    window._isSubmitting = false;
     btn.classList.remove("submitting"); btn.disabled = false;
     return;
   }
@@ -1070,12 +1083,22 @@ async function submitForm() {
     const totW  = document.getElementById("total-amount-wrap"); if (totW) totW.style.display = "none";
     if (document.getElementById("f-cat-mic"))  document.getElementById("f-cat-mic").value  = "";
   } catch (err) {
-    const errCode    = err?.code    || err?.status || "";
-    const errMsg     = err?.message || err?.details || err?.hint || "";
-    const errFull    = JSON.stringify(err, Object.getOwnPropertyNames(err)) || "unknown";
+    // Cleanup orphaned screenshot so storage stays clean
+    if (screenshotUrl) {
+      try {
+        await sb.storage.from("payment-screenshots")
+          .remove([`screenshots/${regId}.jpg`]);
+      } catch (_) { /* best-effort, don't block error UI */ }
+    }
+
+    const errCode = err?.code    || err?.status || "";
+    const errMsg  = err?.message || err?.details || err?.hint || "";
+    const errFull = JSON.stringify(err, Object.getOwnPropertyNames(err)) || "unknown";
     console.error("Supabase insert error:", errFull, "\nPayload:", JSON.stringify(dbPayload, null, 2));
 
-    if (errCode === "42501" || err?.status === 403) {
+    if (errCode === "23505") {
+      showToast("⚠️ Submission conflict — please try submitting again.", "error");
+    } else if (errCode === "42501" || err?.status === 403) {
       showToast("❌ RLS blocked. Code: " + errCode + " — " + errMsg, "error");
     } else if (errCode === "23502") {
       showToast("❌ Missing required field: " + errMsg, "error");
@@ -1084,8 +1107,8 @@ async function submitForm() {
     } else {
       showToast("❌ Insert failed [" + errCode + "]: " + (errMsg || errFull.slice(0,120)), "error");
     }
-    btn.classList.remove("submitting"); btn.disabled = false;
   } finally {
+    window._isSubmitting = false;
     btn.classList.remove("submitting"); btn.disabled = false;
   }
 }
@@ -1190,7 +1213,7 @@ async function loadRegistrations() {
         .from("registrations")
         .select("id,name,email,phone,institution,classyear,segment,segmentname,category,ca_ref,txn,bkash,note,status,timestamp")
         .order("id", { ascending: false })
-        .limit(200);
+        .limit(2000);
       const timeoutPromise = new Promise((_,reject) => setTimeout(() => reject(new Error("timeout")), 25000));
       return Promise.race([fetchPromise, timeoutPromise]);
     }
@@ -1296,10 +1319,10 @@ function filterTable() {
         <td><span class="status-badge ${r.status}">${r.status}</span></td>
         <td>
           <div class="act-btns">
-            <button class="act-btn ok"  onclick="setStatus('${r.id}','approved')">✓</button>
-            <button class="act-btn no"  onclick="setStatus('${r.id}','rejected')">✕</button>
-            <button class="act-btn"     onclick="viewPhotos('${r.id}')" title="${hasScreenshot ? 'View screenshot' : 'No screenshot'}">🖼</button>
-            <button class="act-btn del" onclick="delReg('${r.id}')">🗑</button>
+            <button class="act-btn ok"  onclick="setStatus('${safeId}','approved')">✓</button>
+            <button class="act-btn no"  onclick="setStatus('${safeId}','rejected')">✕</button>
+            <button class="act-btn"     onclick="viewPhotos('${safeId}')" title="${hasScreenshot ? 'View screenshot' : 'No screenshot'}">🖼</button>
+            <button class="act-btn del" onclick="delReg('${safeId}')">🗑</button>
           </div>
         </td>
       </tr>`;
@@ -1348,7 +1371,11 @@ async function delReg(id) {
     console.error("Supabase delete error:", error);
     showToast("❌ Could not delete.", "error");
     await loadRegistrations();
-  } else if (before !== cpRegs.length) {
+  } else {
+    // Best-effort: remove screenshot from Storage too
+    try {
+      await sb.storage.from("payment-screenshots").remove([`screenshots/${id}.jpg`]);
+    } catch (_) {}
     showToast("🗑 Deleted.", "success");
   }
 }
@@ -1366,6 +1393,15 @@ async function clearAll() {
     showToast("❌ Could not clear all.", "error");
     return;
   }
+
+  // Best-effort: remove all screenshot files from Storage too
+  try {
+    const { data: files } = await sb.storage.from("payment-screenshots").list("screenshots");
+    if (files && files.length) {
+      const paths = files.map(f => `screenshots/${f.name}`);
+      await sb.storage.from("payment-screenshots").remove(paths);
+    }
+  } catch (_) {}
 
   cpRegs = [];
   renderDashboard();
@@ -1425,6 +1461,22 @@ function viewPhotos(id) {
     </div>`;
   document.body.appendChild(modal);
   modal.addEventListener("click", e => { if(e.target===modal) modal.remove(); });
+
+  // Lift custom cursor above the modal for desktop users
+  if (!IS_TOUCH) {
+    const cur  = document.getElementById("cursor");
+    const ring = document.getElementById("cursor-ring");
+    if (cur)  cur.style.zIndex  = "999999";
+    if (ring) ring.style.zIndex = "999998";
+    // Restore z-index as soon as the modal is removed (any close path)
+    new MutationObserver((_, obs) => {
+      if (!document.getElementById("photo-modal")) {
+        if (cur)  cur.style.zIndex  = "";
+        if (ring) ring.style.zIndex = "";
+        obs.disconnect();
+      }
+    }).observe(document.body, { childList: true });
+  }
 }
 
 function downloadBase64(dataUrl, filename) {
@@ -1456,31 +1508,68 @@ function exportPhotos() {
   showToast(`✅ Opened ${list.length} screenshot(s) in new tabs.`, "success");
 }
 
-function exportCSV() {
+function exportExcel() {
   if (!cpRegs.length) { showToast("No registrations to export."); return; }
-  const hdrs = ["ID","Name","Email","Phone","Institution","Class","Segment","Category","CA Reference","TxnID","bKash","Note","Date","Status"];
-  const rows = cpRegs.map(r => [
-    r.id,
-    r.name,
-    r.email,
-    r.phone,
-    r.institution || "",
-    r.classyear || "",
-    r.segmentname,
-    r.category || "",
-    r.ca_ref || "",
-    r.txn,
-    r.bkash || "",
-    r.note || "",
-    new Date(r.timestamp).toLocaleString(),
-    r.status
-  ].map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(","));
-  const csv  = [hdrs.join(","),...rows].join("\n");
-  const url  = URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8;"}));
-  const a    = document.createElement("a");
-  a.href = url; a.download = "Revolution2_Registrations_" + new Date().toISOString().slice(0,10) + ".csv";
-  a.click(); URL.revokeObjectURL(url);
-  showToast("✅ CSV exported!", "success");
+  if (!window.XLSX) { showToast("❌ SheetJS not loaded yet. Try again in a moment.", "error"); return; }
+
+  const rows = cpRegs.map(r => ({
+    "ID":           r.id,
+    "Name":         r.name,
+    "Email":        r.email,
+    "Phone":        r.phone,
+    "Institution":  r.institution  || "",
+    "Class / Year": r.classyear    || "",
+    "Segment(s)":   r.segmentname  || "",
+    "Category":     r.category     || "",
+    "CA Reference": r.ca_ref       || "",
+    "TxnID":        r.txn          || "",
+    "bKash No.":    r.bkash        || "",
+    "Date":         new Date(r.timestamp).toLocaleString("en-BD"),
+    "Status":       r.status       || "",
+    "Note":         (r.note        || "").replace(/Screenshot: https?:\/\/\S+\n?/g, "").trim(),
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+
+  // Column widths
+  ws["!cols"] = [
+    {wch:28},{wch:22},{wch:30},{wch:16},{wch:28},
+    {wch:14},{wch:38},{wch:10},{wch:16},{wch:16},
+    {wch:16},{wch:20},{wch:11},{wch:40},
+  ];
+
+  // Freeze top header row
+  ws["!freeze"] = { xSplit:0, ySplit:1, topLeftCell:"A2", activePane:"bottomLeft", state:"frozen" };
+
+  // Bold + red background on header row
+  const hdrs = Object.keys(rows[0]);
+  hdrs.forEach((h, i) => {
+    const cell = XLSX.utils.encode_cell({ r:0, c:i });
+    if (!ws[cell]) return;
+    ws[cell].s = {
+      font:      { bold: true, color: { rgb: "FFFFFF" } },
+      fill:      { fgColor: { rgb: "CC1B1B" } },
+      alignment: { horizontal: "center" },
+    };
+  });
+
+  // Status colour coding per row
+  cpRegs.forEach((r, rowIdx) => {
+    const fillMap = { approved:"D4EDDA", rejected:"F8D7DA", pending:"FFF3CD" };
+    const fill = fillMap[r.status];
+    if (!fill) return;
+    hdrs.forEach((h, colIdx) => {
+      const cell = XLSX.utils.encode_cell({ r: rowIdx + 1, c: colIdx });
+      if (!ws[cell]) return;
+      ws[cell].s = { fill: { fgColor: { rgb: fill } } };
+    });
+  });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Registrations");
+
+  XLSX.writeFile(wb, "Revolution2_Registrations_" + new Date().toISOString().slice(0,10) + ".xlsx", { cellStyles: true });
+  showToast("✅ Excel exported!", "success");
 }
 
 function addSamples() {

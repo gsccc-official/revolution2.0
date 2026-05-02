@@ -789,7 +789,7 @@
       </div>
       <div class="cp-header-btns">
         <button class="btn btn-ghost btn-sm" onclick="loadRegistrations()"><i class="fas fa-sync"></i> Refresh</button>
-        <button class="btn btn-ghost btn-sm" onclick="exportCSV()"><i class="fas fa-download"></i> Export CSV</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportExcel()"><i class="fas fa-download"></i> Export Excel</button>
         <button class="btn btn-ghost btn-sm" onclick="exportPhotos()"><i class="fas fa-images"></i> Export Photos</button>
         <button class="btn btn-ghost btn-sm" onclick="addSamples()"><i class="fas fa-vial"></i> Add Samples</button>
         <button class="btn btn-danger btn-sm" onclick="clearAll()"><i class="fas fa-trash"></i> Clear All</button>
@@ -840,6 +840,7 @@
 </div>
 
 </div>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="script.js"></script>
 </body>
 </html>
